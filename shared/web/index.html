@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roon Server on QNAP</title>
+<style>
+  :root{
+    --bg:#0f1117; --card:#181c26; --card2:#1e2330; --text:#e8eaf0; --muted:#9aa3b5;
+    --accent:#7b5cff; --ok:#3ecf8e; --warn:#ffb020; --err:#ff5d5d; --border:#2a3042;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI","Noto Sans TC",system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.65}
+  .wrap{max-width:880px;margin:0 auto;padding:32px 20px 64px}
+  header{display:flex;align-items:center;gap:16px;margin-bottom:28px}
+  .logo{width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#7b5cff,#3d7bff);display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:700;color:#fff}
+  h1{font-size:22px;margin:0}
+  h1 small{display:block;font-size:13px;font-weight:400;color:var(--muted)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin-bottom:18px}
+  .card h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .pill{display:inline-block;padding:3px 12px;border-radius:999px;font-size:13px;font-weight:600}
+  .pill.ok{background:rgba(62,207,142,.15);color:var(--ok)}
+  .pill.warn{background:rgba(255,176,32,.15);color:var(--warn)}
+  .pill.err{background:rgba(255,93,93,.15);color:var(--err)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  td{padding:6px 0;vertical-align:top}
+  td:first-child{color:var(--muted);width:34%;padding-right:12px}
+  code{background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;font-size:13px;color:#c9d4ff;word-break:break-all}
+  pre{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto;font-size:13px;color:#c9d4ff}
+  .callout{border-left:4px solid var(--accent);background:var(--card2);border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0;font-size:14px}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout b{color:#fff}
+  ul,ol{padding-left:22px;margin:8px 0}
+  li{margin:4px 0;font-size:14px}
+  a{color:#8fb0ff}
+  .muted{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">R</div>
+    <h1>Roon Server <small>官方 Docker 映像 · Container Station · QPKG 管理外殼</small></h1>
+  </header>
+
+  <div class="card">
+    <h2>目前狀態 <span id="state" class="pill warn">讀取中…</span></h2>
+    <table id="info">
+      <tr><td>容器</td><td id="f-container">–</td></tr>
+      <tr><td>映像檔</td><td id="f-image">–</td></tr>
+      <tr><td>網路模式</td><td><code>host</code>（由套件強制，不可修改）</td></tr>
+      <tr><td>資料庫 / 快取（/Roon）</td><td id="f-data">–</td></tr>
+      <tr><td>音樂庫（/Music）</td><td id="f-music">–</td></tr>
+      <tr><td>備份（/RoonBackups）</td><td id="f-backup">–</td></tr>
+      <tr><td>時區</td><td id="f-tz">–</td></tr>
+      <tr><td>狀態更新時間</td><td id="f-updated">–</td></tr>
+    </table>
+    <div id="ssd-banner"></div>
+    <p class="muted">此頁狀態於服務啟動／停止時更新；即時容器狀態請開啟 Container Station。Roon 本身沒有網頁介面，請使用 Roon 桌面／行動 App 連線。</p>
+  </div>
+
+  <div class="card">
+    <h2>⚠️ 為什麼強制使用 host 網路模式？</h2>
+    <p style="font-size:14px">
+      Roon 透過<b>區網多播（multicast）／廣播</b>來探索串流播放裝置（RAAT 端點、Roon Ready 器材、AirPlay/Chromecast）
+      以及遙控器 App。若容器使用 bridge/NAT 網路，多播封包無法跨越 NAT 邊界，
+      <b>裝置探索與遙控器連線會完全失效</b>。因此本套件在每次啟動時都會檢查容器是否為
+      <code>--net=host</code>，若被改動會自動以 host 模式重建容器。請勿在 Container Station 中修改此設定。
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>💾 資料庫請放在 SSD 儲存池</h2>
+    <p style="font-size:14px">
+      Roon 資料庫與快取（掛載到容器內的 <code>/Roon</code>）充滿小型隨機讀寫。放在傳統硬碟（HDD）磁碟區時，
+      隨機讀寫延遲會造成<b>音訊解碼不順、播放清單與媒體庫載入緩慢、搜尋卡頓</b>。
+    </p>
+    <div class="callout warn">
+      <b>設定方式：</b>編輯 QPKG 安裝目錄下的 <code>roon.conf</code>，將
+      <code>ROON_DATA_PATH</code> 指向 SSD 磁碟區上的路徑（例如
+      <code>/share/CACHEDEV2_DATA/RoonServer/data</code>），再重新啟動本套件。
+    </div>
+    <ol>
+      <li>「儲存與快照總管」確認哪個磁碟區位於 SSD 儲存池（純 SSD 池，非 SSD 快取）。</li>
+      <li>SSH 登入 NAS，編輯 <code>&lt;QPKG 安裝目錄&gt;/roon.conf</code>：<br>
+        <code>ROON_DATA_PATH="/share/CACHEDEV2_DATA/RoonServer/data"</code></li>
+      <li>若要搬移既有資料庫：先停止套件，將舊資料夾整個複製到新路徑，再啟動。</li>
+      <li>App Center 重新啟動 Roon Server，或執行 <code>/etc/init.d/roon-server-docker.sh restart</code>。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>🚀 首次使用</h2>
+    <ol>
+      <li>安裝完成後，套件會於<b>背景</b>呼叫 Container Station 下載官方映像檔
+        <code>ghcr.io/roonlabs/roonserver:latest</code>，完成後自動建立並啟動容器（視網速約數分鐘）。</li>
+      <li>在同一區網的電腦／平板安裝 <a href="https://roon.app/downloads" target="_blank" rel="noopener">Roon App</a>，
+        它會自動找到這台 NAS 上的 Roon Server（host 網路 + 多播探索）。</li>
+      <li>登入 Roon 帳號，將音樂資料夾指向容器內的 <code>/Music</code>。</li>
+      <li>建議在 Roon「設定 → 備份」把備份目的地設為 <code>/RoonBackups</code>。</li>
+    </ol>
+    <p class="muted">下載進度：<code>&lt;QPKG 安裝目錄&gt;/logs/pull.log</code>；服務記錄：<code>logs/roon-server.log</code>。</p>
+  </div>
+
+  <div class="card">
+    <h2>🔧 常用維護指令（SSH）</h2>
+    <pre>/etc/init.d/roon-server-docker.sh status    # 檢視狀態
+/etc/init.d/roon-server-docker.sh restart   # 重新啟動
+/etc/init.d/roon-server-docker.sh update    # 更新官方映像並重建容器（資料庫保留）</pre>
+  </div>
+
+  <p class="muted">
+    本套件僅包含管理指令碼與此狀態頁，不內含任何 Roon 程式；Roon Server 由
+    <a href="https://github.com/RoonLabs/roon-docker" target="_blank" rel="noopener">RoonLabs 官方映像</a> 提供。
+    套件結構參考 <a href="https://github.com/qnap-dev/containerized-qpkg" target="_blank" rel="noopener">qnap-dev/containerized-qpkg</a>。
+  </p>
+</div>
+
+<script>
+(function(){
+  var stateMap = {
+    "running":            ["ok",   "執行中"],
+    "stopped":            ["warn", "已停止"],
+    "downloading-image":  ["warn", "映像檔下載中…"],
+    "pull-failed":        ["err",  "映像檔下載失敗"],
+    "no-container-engine":["err",  "找不到 Container Station"],
+    "error":              ["err",  "發生錯誤"]
+  };
+  function put(id, v){ document.getElementById(id).textContent = v || "（未設定）"; }
+  fetch("status.json", {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(s){
+    var el = document.getElementById("state");
+    var m = stateMap[s.state] || ["warn", s.state];
+    el.className = "pill " + m[0];
+    el.textContent = m[1];
+    put("f-container", s.container);
+    put("f-image", s.image);
+    put("f-data", s.data_path);
+    put("f-music", s.music_path);
+    put("f-backup", s.backup_path);
+    put("f-tz", s.tz);
+    put("f-updated", s.updated_at);
+    var banner = document.getElementById("ssd-banner");
+    if (s.data_media === "hdd") {
+      banner.innerHTML = '<div class="callout warn"><b>⚠️ 資料庫目前位於傳統硬碟磁碟區！</b>請依下方說明將 <code>ROON_DATA_PATH</code> 移到 SSD 儲存池，以避免播放與載入延遲。</div>';
+    } else if (s.data_media === "ssd") {
+      banner.innerHTML = '<div class="callout"><b>✅ 資料庫位於 SSD 磁碟區</b>，隨機讀寫延遲已最佳化。</div>';
+    } else {
+      banner.innerHTML = '<div class="callout">無法自動判斷資料庫所在磁碟類型，請自行確認 <code>ROON_DATA_PATH</code> 位於 SSD 儲存池。</div>';
+    }
+  }).catch(function(){
+    var el = document.getElementById("state");
+    el.className = "pill warn";
+    el.textContent = "尚無狀態（服務尚未啟動）";
+  });
+})();
+</script>
+</body>
+</html>

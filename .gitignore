@@ -1,0 +1,4 @@
+build/
+*.qpkg
+*.qpkg.md5
+.qdk_conf*

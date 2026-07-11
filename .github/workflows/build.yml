@@ -1,0 +1,50 @@
+name: Build QPKG
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install QDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git make rsync xz-utils dos2unix
+          git clone --depth 1 https://github.com/qnap-dev/QDK.git /tmp/QDK
+          cd /tmp/QDK && sudo ./InstallToUbuntu.sh install
+
+      - name: Normalize line endings
+        run: |
+          find . -type f \( -name '*.sh' -o -name 'package_routines' -o -name 'qpkg.cfg' -o -name '*.conf*' \) -exec dos2unix {} +
+
+      - name: Build QPKG
+        run: |
+          export PATH="/usr/share/QDK/bin:$PATH"
+          qbuild --build-arch x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoonServer-qpkg
+          path: |
+            build/*.qpkg
+            build/*.md5
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/*.qpkg
+            build/*.md5
+          generate_release_notes: true

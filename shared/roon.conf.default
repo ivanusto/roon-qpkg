@@ -1,0 +1,51 @@
+# ============================================================
+#  Roon Server (Docker) QPKG configuration
+#  File location on the NAS: <QPKG install dir>/roon.conf
+#  Apply changes with:  /etc/init.d/roon-server-docker.sh restart
+#  (or restart the app from App Center)
+# ============================================================
+
+# Official Roon Server image (amd64 only).
+#ROON_IMAGE="ghcr.io/roonlabs/roonserver:latest"
+
+# Container name shown in Container Station.
+#ROON_CONTAINER_NAME="roonserver"
+
+# --- Roon database & cache (/Roon) ---------------------------
+# *** STRONGLY RECOMMENDED: place this on an SSD storage pool ***
+# The Roon database does constant small random reads/writes.
+# On an HDD volume you will get slow audio analysis, laggy
+# playlist/library loading and sluggish search.
+# Example (volume 2 being an SSD pool):
+#ROON_DATA_PATH="/share/CACHEDEV2_DATA/RoonServer/data"
+
+# --- Music library (/Music) ----------------------------------
+# Your music share. Additional folders can be added later from
+# Roon (Settings > Storage) as subfolders of this path.
+#ROON_MUSIC_PATH="/share/Multimedia"
+
+# --- Roon backups (/RoonBackups), optional -------------------
+# Point Roon (Settings > Backups) at /RoonBackups inside the app.
+#ROON_BACKUP_PATH="/share/CACHEDEV1_DATA/RoonServer/backups"
+
+# IANA timezone for correct logging/scheduling.
+# Auto-detected from QTS when unset.
+#ROON_TZ="Asia/Taipei"
+
+# Seconds to wait for a clean shutdown (protects the Roon DB).
+#ROON_STOP_TIMEOUT="120"
+
+# --- Status page (UI shell) ----------------------------------
+# Served by a tiny busybox httpd container on this port.
+# The App Center icon link follows this value automatically.
+#ROON_UI_PORT="18630"
+
+# Image used for the status-page container.
+#ROON_UI_IMAGE="busybox:stable"
+
+# Extra "docker run" arguments (advanced).
+# NOTE: the network mode is fixed to --net=host by the service
+# script and cannot be overridden here — Roon's device & remote
+# discovery relies on LAN multicast, which does not work behind
+# bridge/NAT networking.
+#ROON_EXTRA_ARGS=""

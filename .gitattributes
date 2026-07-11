@@ -1,0 +1,5 @@
+# QPKG scripts run on busybox sh — they must keep LF endings.
+* text=auto eol=lf
+*.gif binary
+*.png binary
+*.qpkg binary
