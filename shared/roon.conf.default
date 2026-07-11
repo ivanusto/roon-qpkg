@@ -20,9 +20,12 @@
 #ROON_DATA_PATH="/share/CACHEDEV2_DATA/RoonServer/data"
 
 # --- Music library (/Music) ----------------------------------
-# Your music share. Additional folders can be added later from
-# Roon (Settings > Storage) as subfolders of this path.
-#ROON_MUSIC_PATH="/share/Multimedia"
+# Your music share. Auto-detected from the NAS Multimedia/Music/
+# Public share when unset. Easiest way to change it: the folder
+# settings form on the app's status page.
+# In Roon use "Add Folder" and pick /Music (NOT an SMB share —
+# the container cannot mount SMB and doesn't need to).
+#ROON_MUSIC_PATH="/share/Music"
 
 # --- Roon backups (/RoonBackups), optional -------------------
 # Point Roon (Settings > Backups) at /RoonBackups inside the app.

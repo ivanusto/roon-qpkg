@@ -21,6 +21,8 @@ PKG_MAIN_REMOVE="{
 }"
 
 PKG_POST_REMOVE="{
+    sed -i '/roon-server-docker.sh apply-pending/d' /etc/config/crontab 2>/dev/null || true
+    crontab /etc/config/crontab 2>/dev/null || true
     /sbin/write_log \"[RoonServerDocker] Removed. Your Roon database was kept on disk; delete the RoonServer data folder manually if you no longer need it.\" 4
 }"
 
@@ -53,7 +55,14 @@ pkg_post_install(){
         cp "${SYS_QPKG_DIR}/roon.conf.default" "${SYS_QPKG_DIR}/roon.conf"
     fi
     chmod +x "${SYS_QPKG_DIR}/roon-server-docker.sh"
-    mkdir -p "${SYS_QPKG_DIR}/logs"
+    chmod +x "${SYS_QPKG_DIR}/web/cgi-bin/save.cgi"
+    mkdir -p "${SYS_QPKG_DIR}/logs" "${SYS_QPKG_DIR}/inbox"
+
+    # Cron job: apply folder settings saved from the status page
+    # (roon-server-docker.sh apply-pending is a no-op when idle).
+    sed -i '/roon-server-docker.sh apply-pending/d' /etc/config/crontab 2>/dev/null
+    echo "* * * * * ${SYS_QPKG_DIR}/roon-server-docker.sh apply-pending" >> /etc/config/crontab
+    crontab /etc/config/crontab 2>/dev/null
 
     # Warn (don't abort) if the status-page port is already taken.
     if netstat -lnt 2>/dev/null | grep -q ":18630 "; then

@@ -31,6 +31,9 @@ LOG_FILE="$LOG_DIR/roon-server.log"
 PULL_LOG="$LOG_DIR/pull.log"
 WEB_DIR="$QPKG_ROOT/web"
 STATUS_JSON="$WEB_DIR/status.json"
+# Settings saved from the status page land here (via the UI container's
+# CGI); "apply-pending" (cron, every minute) validates and applies them.
+INBOX_DIR="$QPKG_ROOT/inbox"
 
 mkdir -p "$LOG_DIR" 2>/dev/null
 
@@ -68,10 +71,21 @@ detect_tz() {
     esac
 }
 
-# Default volume mount point (e.g. /share/CACHEDEV1_DATA).
+# Default volume mount point (e.g. /share/CACHEDEV1_DATA, /share/ZFS530_DATA).
 default_volume() {
     DEFVOL=$(/sbin/getcfg SHARE_DEF defVolMP -f /etc/config/def_share.info 2>/dev/null)
     [ -n "$DEFVOL" ] && echo "$DEFVOL" || echo "/share/CACHEDEV1_DATA"
+}
+
+# Resolve a real music share from smb.conf instead of guessing a /share
+# name — share names/paths differ per NAS (QTS vs QuTS hero, renamed
+# shares, multiple volumes).
+detect_music_share() {
+    for SH in Multimedia Music Public; do
+        P=$(/sbin/getcfg "$SH" path -f /etc/config/smb.conf 2>/dev/null)
+        [ -n "$P" ] && [ -d "$P" ] && { echo "$P"; return 0; }
+    done
+    echo ""
 }
 
 load_conf() {
@@ -80,7 +94,8 @@ load_conf() {
     ROON_IMAGE="${ROON_IMAGE:-ghcr.io/roonlabs/roonserver:latest}"
     ROON_CONTAINER_NAME="${ROON_CONTAINER_NAME:-roonserver}"
     ROON_DATA_PATH="${ROON_DATA_PATH:-$(default_volume)/RoonServer/data}"
-    ROON_MUSIC_PATH="${ROON_MUSIC_PATH:-/share/Multimedia}"
+    ROON_MUSIC_PATH="${ROON_MUSIC_PATH:-$(detect_music_share)}"
+    [ -n "$ROON_MUSIC_PATH" ] || ROON_MUSIC_PATH="$(default_volume)/RoonServer/music"
     ROON_BACKUP_PATH="${ROON_BACKUP_PATH:-}"
     ROON_TZ="${ROON_TZ:-$(detect_tz)}"
     ROON_EXTRA_ARGS="${ROON_EXTRA_ARGS:-}"
@@ -168,7 +183,11 @@ run_container() {
     mkdir -p "$ROON_DATA_PATH"
     [ -n "$ROON_BACKUP_PATH" ] && mkdir -p "$ROON_BACKUP_PATH"
     if [ ! -d "$ROON_MUSIC_PATH" ]; then
-        log "Music path '$ROON_MUSIC_PATH' does not exist; creating it. Point ROON_MUSIC_PATH in $ROON_CONF at your music share if this is wrong." 2
+        # Never create directories directly under /share — that root is
+        # tmpfs on QTS and anything made there vanishes on reboot.
+        FALLBACK="$(default_volume)/RoonServer/music"
+        log "Music path '$ROON_MUSIC_PATH' does not exist. Using '$FALLBACK' for now — set your real music share on the status page (資料夾設定)." 2
+        ROON_MUSIC_PATH="$FALLBACK"
         mkdir -p "$ROON_MUSIC_PATH"
     fi
 
@@ -188,20 +207,30 @@ run_container() {
 
 # ----- status-page container (busybox httpd on ROON_UI_PORT) ---------
 
-ui_current_port() {
-    "$DOCKER" inspect \
-        -f '{{range $p, $b := .HostConfig.PortBindings}}{{(index $b 0).HostPort}}{{end}}' \
-        "$UI_NAME" 2>/dev/null
+# List candidate folders for the settings form on the status page.
+write_shares() {
+    OUT="$WEB_DIR/shares.json"
+    {
+        printf '['
+        FIRST=1
+        for D in /share/*; do
+            [ -d "$D" ] || continue
+            case "$(basename "$D")" in
+                external) continue ;;
+            esac
+            [ $FIRST = 1 ] || printf ','
+            printf '"%s"' "$(json_escape "$D")"
+            FIRST=0
+        done
+        printf ']'
+    } > "$OUT" 2>/dev/null
 }
 
 start_ui() {
-    if "$DOCKER" inspect "$UI_NAME" >/dev/null 2>&1; then
-        if [ "$(ui_current_port)" = "$ROON_UI_PORT" ]; then
-            "$DOCKER" start "$UI_NAME" >/dev/null 2>&1
-            return 0
-        fi
-        "$DOCKER" rm -f "$UI_NAME" >/dev/null 2>&1
-    fi
+    # The UI container is stateless — recreate it on every start so it
+    # always reflects the current port and mounts.
+    "$DOCKER" rm -f "$UI_NAME" >/dev/null 2>&1
+    mkdir -p "$INBOX_DIR"
     if [ -z "$("$DOCKER" images -q "$ROON_UI_IMAGE" 2>/dev/null)" ]; then
         "$DOCKER" pull "$ROON_UI_IMAGE" >> "$PULL_LOG" 2>&1 || {
             log "Could not pull '$ROON_UI_IMAGE' for the status page; Roon itself is unaffected. See $PULL_LOG." 2
@@ -213,6 +242,7 @@ start_ui() {
         --restart unless-stopped \
         -p "$ROON_UI_PORT":80 \
         -v "$WEB_DIR":/www:ro \
+        -v "$INBOX_DIR":/www/inbox \
         "$ROON_UI_IMAGE" httpd -f -p 80 -h /www >/dev/null 2>&1 \
         || log "Failed to start the status-page container on port $ROON_UI_PORT (port in use?). Set ROON_UI_PORT in $ROON_CONF to a free port and restart." 2
     # Keep the App Center / desktop icon pointing at the right port.
@@ -255,7 +285,93 @@ pull_and_run_bg() {
     spawn_bgpull
 }
 
+# Update (or add) KEY="VALUE" in roon.conf.
+set_conf_value() {
+    touch "$ROON_CONF"
+    if grep -q "^$1=" "$ROON_CONF" 2>/dev/null; then
+        sed -i "s|^$1=.*|$1=\"$2\"|" "$ROON_CONF"
+    else
+        echo "$1=\"$2\"" >> "$ROON_CONF"
+    fi
+}
+
+# Validate and apply folder settings saved from the status page.
+# Runs from cron every minute; a no-op when there is nothing pending.
+# All parsing/validation happens here on the host — the CGI in the UI
+# container only drops the raw request into the inbox.
+apply_pending() {
+    PENDING="$INBOX_DIR/pending.conf"
+    [ -f "$PENDING" ] || return 0
+    WORK="$PENDING.processing"
+    mv "$PENDING" "$WORK" 2>/dev/null || return 0
+    CHANGED=0
+    while IFS='=' read -r K V; do
+        case "$K" in
+            ROON_MUSIC_PATH|ROON_DATA_PATH|ROON_BACKUP_PATH) ;;
+            *) continue ;;
+        esac
+        V=$(printf '%s' "$V" | tr -d '\r')
+        if [ -z "$V" ]; then
+            # only the backup mount is optional
+            if [ "$K" = "ROON_BACKUP_PATH" ]; then
+                set_conf_value "$K" ""
+                CHANGED=1
+            fi
+            continue
+        fi
+        case "$V" in
+            /share/?*) ;;  # any folder under /share/ (share roots included)
+            *) log "Rejected $K='$V' from the settings page (must be a folder under /share/)." 2; continue ;;
+        esac
+        case "$V" in
+            */../*|*/..) log "Rejected $K from the settings page (path traversal)." 2; continue ;;
+        esac
+        # quotes/expansion break conf sourcing; ':' breaks docker -v syntax
+        if printf '%s' "$V" | grep -q '["$`\\|:]'; then
+            log "Rejected $K from the settings page (invalid characters in path)." 2
+            continue
+        fi
+        if [ "$K" = "ROON_MUSIC_PATH" ] && [ ! -d "$V" ]; then
+            log "Rejected ROON_MUSIC_PATH='$V' (folder does not exist)." 2
+            continue
+        fi
+        # for data/backup the folder may be new, but its top-level
+        # share/volume must already exist
+        TOP=$(printf '%s' "$V" | cut -d/ -f1-3)
+        if [ ! -d "$TOP" ]; then
+            log "Rejected $K='$V' ('$TOP' does not exist)." 2
+            continue
+        fi
+        set_conf_value "$K" "$V"
+        CHANGED=1
+    done < "$WORK"
+    rm -f "$WORK"
+    [ "$CHANGED" = 1 ] || return 0
+
+    log "Folder settings from the status page applied; recreating the Roon container with the new mounts (database is kept)." 4
+    . "$ROON_CONF"
+    if container_exists; then
+        "$DOCKER" stop -t "$ROON_STOP_TIMEOUT" "$ROON_CONTAINER_NAME" >/dev/null 2>&1
+        "$DOCKER" rm "$ROON_CONTAINER_NAME" >/dev/null 2>&1
+    fi
+    if image_present; then
+        if run_container; then
+            write_status "running"
+        else
+            write_status "error"
+            log "Failed to recreate the Roon container after the settings change. See $LOG_FILE." 1
+        fi
+    else
+        # image still downloading — the new conf is picked up when the
+        # container is created after the pull finishes
+        write_status "downloading-image"
+    fi
+    write_shares
+}
+
 finish_after_pull() {
+    # settings may have changed while the image was downloading
+    [ -f "$ROON_CONF" ] && . "$ROON_CONF"
     if container_exists || run_container; then
         write_status "running"
         log "Roon image downloaded; Roon Server container created and started (host network)." 4
@@ -268,6 +384,7 @@ finish_after_pull() {
 do_start() {
     MEDIA=$(ssd_advice)
     write_status "starting" "$MEDIA"
+    write_shares
     start_ui
 
     if container_exists; then
@@ -373,6 +490,10 @@ case "$1" in
     remove)
         do_remove
         ;;
+    apply-pending)
+        # cron (every minute): apply folder settings saved from the UI
+        apply_pending
+        ;;
     diag)
         echo "docker CLI : $DOCKER"
         "$DOCKER" version 2>&1 | head -n 6
@@ -412,7 +533,7 @@ case "$1" in
         fi
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|pull|bgpull|update|remove|diag}"
+        echo "Usage: $0 {start|stop|restart|status|pull|bgpull|update|remove|apply-pending|diag}"
         exit 1
         ;;
 esac

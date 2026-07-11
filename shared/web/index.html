@@ -34,6 +34,12 @@
   li{margin:4px 0;font-size:14px}
   a{color:#8fb0ff}
   .muted{color:var(--muted);font-size:13px}
+  input[type=text]{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-size:14px;font-family:inherit}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 22px;font-size:14px;font-weight:600;cursor:pointer;margin-top:14px}
+  button:hover{filter:brightness(1.1)}
+  #save-msg{margin-left:12px;font-size:13px}
 </style>
 </head>
 <body>
@@ -94,13 +100,36 @@
   </div>
 
   <div class="card">
+    <h2>📁 資料夾設定</h2>
+    <p style="font-size:14px" class="muted">
+      直接在此設定掛載路徑，儲存後<b>約 1 分鐘內</b>自動套用並重建容器
+      （Roon 資料庫保留；變更資料庫路徑<b>不會</b>自動搬移舊資料）。
+      輸入框會提示 NAS 上現有的共享資料夾。
+    </p>
+    <datalist id="share-list"></datalist>
+    <label for="in-music">音樂庫（掛載到容器 <code>/Music</code>）— 指向你放音樂的共享資料夾</label>
+    <input type="text" id="in-music" list="share-list" placeholder="/share/Music">
+    <label for="in-data">Roon 資料庫／快取（掛載到 <code>/Roon</code>）— 請放在 SSD 磁碟區</label>
+    <input type="text" id="in-data" list="share-list" placeholder="/share/CACHEDEV2_DATA/RoonServer/data">
+    <label for="in-backup">備份（掛載到 <code>/RoonBackups</code>，留空 = 不掛載）</label>
+    <input type="text" id="in-backup" list="share-list" placeholder="">
+    <br>
+    <button id="save-btn">儲存設定</button><span id="save-msg"></span>
+    <div class="callout" style="margin-top:14px">
+      <b>在 Roon App 中請用「新增資料夾」選 <code>/Music</code>。</b>
+      不要用「新增網路共享位址（SMB）」——Roon 跑在容器內，無法掛載 SMB
+      （會出現 UnexpectedError），而且音樂已由本套件直接掛載到 <code>/Music</code>，不需繞道網路。
+    </div>
+  </div>
+
+  <div class="card">
     <h2>🚀 首次使用</h2>
     <ol>
       <li>安裝完成後，套件會於<b>背景</b>呼叫 Container Station 下載官方映像檔
         <code>ghcr.io/roonlabs/roonserver:latest</code>，完成後自動建立並啟動容器（視網速約數分鐘）。</li>
       <li>在同一區網的電腦／平板安裝 <a href="https://roon.app/downloads" target="_blank" rel="noopener">Roon App</a>，
         它會自動找到這台 NAS 上的 Roon Server（host 網路 + 多播探索）。</li>
-      <li>登入 Roon 帳號，將音樂資料夾指向容器內的 <code>/Music</code>。</li>
+      <li>登入 Roon 帳號，於「設定 → 儲存位置」按「<b>新增資料夾</b>」選擇容器內的 <code>/Music</code>（勿使用 SMB 網路共享）。</li>
       <li>建議在 Roon「設定 → 備份」把備份目的地設為 <code>/RoonBackups</code>。</li>
     </ol>
     <p class="muted">下載進度：<code>&lt;QPKG 安裝目錄&gt;/logs/pull.log</code>；服務記錄：<code>logs/roon-server.log</code>。</p>
@@ -131,6 +160,43 @@
     "error":              ["err",  "發生錯誤"]
   };
   function put(id, v){ document.getElementById(id).textContent = v || "（未設定）"; }
+  var prefilled = false;
+  function prefill(s){
+    if (prefilled) return;
+    prefilled = true;
+    document.getElementById("in-music").value = s.music_path || "";
+    document.getElementById("in-data").value = s.data_path || "";
+    document.getElementById("in-backup").value = s.backup_path || "";
+  }
+  fetch("shares.json", {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(list){
+    var dl = document.getElementById("share-list");
+    list.forEach(function(p){
+      var o = document.createElement("option");
+      o.value = p;
+      dl.appendChild(o);
+    });
+  }).catch(function(){});
+  document.getElementById("save-btn").addEventListener("click", function(){
+    var body =
+      "ROON_MUSIC_PATH="  + document.getElementById("in-music").value.trim()  + "\n" +
+      "ROON_DATA_PATH="   + document.getElementById("in-data").value.trim()   + "\n" +
+      "ROON_BACKUP_PATH=" + document.getElementById("in-backup").value.trim() + "\n";
+    var msg = document.getElementById("save-msg");
+    msg.style.color = "";
+    msg.textContent = "儲存中…";
+    fetch("cgi-bin/save.cgi", {method:"POST", body: body}).then(function(r){ return r.text(); }).then(function(t){
+      if (t.indexOf("OK") === 0) {
+        msg.style.color = "var(--ok)";
+        msg.textContent = "已儲存，約 1 分鐘內自動套用並重建容器。";
+      } else {
+        msg.style.color = "var(--err)";
+        msg.textContent = "儲存失敗，請重試。";
+      }
+    }).catch(function(){
+      msg.style.color = "var(--err)";
+      msg.textContent = "儲存失敗（無法連線）。";
+    });
+  });
   function loadPullProgress(show){
     var box = document.getElementById("pull-box");
     if (!show) { box.style.display = "none"; return; }
@@ -156,6 +222,7 @@
     put("f-backup", s.backup_path);
     put("f-tz", s.tz);
     put("f-updated", s.updated_at);
+    prefill(s);
     var banner = document.getElementById("ssd-banner");
     if (s.data_media === "hdd") {
       banner.innerHTML = '<div class="callout warn"><b>⚠️ 資料庫目前位於傳統硬碟磁碟區！</b>請依下方說明將 <code>ROON_DATA_PATH</code> 移到 SSD 儲存池，以避免播放與載入延遲。</div>';
