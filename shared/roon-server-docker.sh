@@ -237,14 +237,18 @@ start_ui() {
             return 1
         }
     fi
-    "$DOCKER" run -d \
+    # The inbox is mounted OUTSIDE the read-only /www docroot: docker
+    # cannot create a /www/inbox mountpoint inside an ro bind mount
+    # ("read-only file system"), and this also keeps the pending file
+    # from being served over HTTP.
+    UI_ERR=$("$DOCKER" run -d \
         --name "$UI_NAME" \
         --restart unless-stopped \
         -p "$ROON_UI_PORT":80 \
         -v "$WEB_DIR":/www:ro \
-        -v "$INBOX_DIR":/www/inbox \
-        "$ROON_UI_IMAGE" httpd -f -p 80 -h /www >/dev/null 2>&1 \
-        || log "Failed to start the status-page container on port $ROON_UI_PORT (port in use?). Set ROON_UI_PORT in $ROON_CONF to a free port and restart." 2
+        -v "$INBOX_DIR":/inbox \
+        "$ROON_UI_IMAGE" httpd -f -p 80 -h /www 2>&1 >/dev/null) \
+        || log "Failed to start the status-page container on port $ROON_UI_PORT: $UI_ERR — if the port is taken, set ROON_UI_PORT in $ROON_CONF to a free port and restart." 2
     # Keep the App Center / desktop icon pointing at the right port.
     /sbin/setcfg "$QPKG_NAME" Web_Port "$ROON_UI_PORT" -f "$CONF" 2>/dev/null
 }

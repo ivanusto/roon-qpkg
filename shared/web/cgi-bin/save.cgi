@@ -7,8 +7,8 @@ echo "Content-Type: text/plain; charset=utf-8"
 echo ""
 if [ "$REQUEST_METHOD" = "POST" ] && [ -n "$CONTENT_LENGTH" ] \
    && [ "$CONTENT_LENGTH" -gt 0 ] && [ "$CONTENT_LENGTH" -le 4096 ] 2>/dev/null; then
-    head -c "$CONTENT_LENGTH" > /www/inbox/pending.tmp 2>/dev/null \
-        && mv /www/inbox/pending.tmp /www/inbox/pending.conf \
+    head -c "$CONTENT_LENGTH" > /inbox/pending.tmp 2>/dev/null \
+        && mv /inbox/pending.tmp /inbox/pending.conf \
         && { echo "OK"; exit 0; }
 fi
 echo "ERROR"
