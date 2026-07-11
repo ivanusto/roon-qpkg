@@ -56,7 +56,11 @@
       <tr><td>狀態更新時間</td><td id="f-updated">–</td></tr>
     </table>
     <div id="ssd-banner"></div>
-    <p class="muted">此頁狀態於服務啟動／停止時更新；即時容器狀態請開啟 Container Station。Roon 本身沒有網頁介面，請使用 Roon 桌面／行動 App 連線。</p>
+    <div id="pull-box" style="display:none">
+      <p class="muted" style="margin-bottom:4px">映像檔下載進度（每 10 秒自動更新）：</p>
+      <pre id="pull-pre" style="max-height:220px;overflow:auto"></pre>
+    </div>
+    <p class="muted">此頁每 10 秒自動更新；即時容器狀態請開啟 Container Station。Roon 本身沒有網頁介面，請使用 Roon 桌面／行動 App 連線。</p>
   </div>
 
   <div class="card">
@@ -127,6 +131,19 @@
     "error":              ["err",  "發生錯誤"]
   };
   function put(id, v){ document.getElementById(id).textContent = v || "（未設定）"; }
+  function loadPullProgress(show){
+    var box = document.getElementById("pull-box");
+    if (!show) { box.style.display = "none"; return; }
+    fetch("pull-progress.txt", {cache:"no-store"}).then(function(r){
+      return r.ok ? r.text() : "";
+    }).then(function(t){
+      if (t) {
+        box.style.display = "block";
+        document.getElementById("pull-pre").textContent = t;
+      }
+    }).catch(function(){});
+  }
+  function load(){
   fetch("status.json", {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(s){
     var el = document.getElementById("state");
     var m = stateMap[s.state] || ["warn", s.state];
@@ -147,11 +164,15 @@
     } else {
       banner.innerHTML = '<div class="callout">無法自動判斷資料庫所在磁碟類型，請自行確認 <code>ROON_DATA_PATH</code> 位於 SSD 儲存池。</div>';
     }
+    loadPullProgress(s.state === "downloading-image" || s.state === "pull-failed");
   }).catch(function(){
     var el = document.getElementById("state");
     el.className = "pill warn";
     el.textContent = "尚無狀態（服務尚未啟動）";
   });
+  }
+  load();
+  setInterval(load, 10000);
 })();
 </script>
 </body>

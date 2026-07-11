@@ -62,8 +62,10 @@ pkg_post_install(){
 
     # Kick off the image download in the background via the system
     # container engine — installation returns immediately, Roon Server
-    # starts by itself once the image is ready.
-    nohup "${SYS_QPKG_DIR}/roon-server-docker.sh" pull >/dev/null 2>&1 &
+    # starts by itself once the image is ready. "bgpull" detaches with
+    # setsid so the download survives App Center reaping this script's
+    # process group.
+    "${SYS_QPKG_DIR}/roon-server-docker.sh" bgpull
 
     /sbin/write_log "[RoonServerDocker] Installed. The official Roon image is being downloaded by Container Station in the background. IMPORTANT: keep the container in host network mode, and put the Roon database on an SSD volume — open the app's status page (port 18630) for details." 4
 }

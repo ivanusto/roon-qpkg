@@ -234,18 +234,35 @@ pull_image() {
     "$DOCKER" pull "$ROON_IMAGE" >> "$PULL_LOG" 2>&1
 }
 
+# Spawn a fully detached background pull. setsid puts the job in its
+# own session so it survives App Center killing the install/start
+# script's process group (plain nohup children can be reaped with it,
+# leaving the pull never actually running).
+spawn_bgpull() {
+    SELF="$QPKG_ROOT/roon-server-docker.sh"
+    if command -v setsid >/dev/null 2>&1; then
+        setsid "$SELF" _bg_pull </dev/null >/dev/null 2>&1 &
+    else
+        nohup "$SELF" _bg_pull </dev/null >/dev/null 2>&1 &
+    fi
+}
+
 # Pull in the background, then create + start the container.
 # Used on first start so App Center installation returns immediately.
 pull_and_run_bg() {
     write_status "downloading-image"
     log "Roon image '$ROON_IMAGE' not present yet. Container Station is downloading it in the background; Roon Server will start automatically when the download finishes (progress: $PULL_LOG)." 4
-    nohup sh -c "
-        if \"$DOCKER\" pull \"$ROON_IMAGE\" >> \"$PULL_LOG\" 2>&1; then
-            \"$0\" _run_after_pull
-        else
-            \"$0\" _pull_failed
-        fi
-    " >/dev/null 2>&1 &
+    spawn_bgpull
+}
+
+finish_after_pull() {
+    if container_exists || run_container; then
+        write_status "running"
+        log "Roon image downloaded; Roon Server container created and started (host network)." 4
+    else
+        write_status "error"
+        log "Image downloaded but the container could not be created. See $LOG_FILE." 1
+    fi
 }
 
 do_start() {
@@ -343,7 +360,12 @@ case "$1" in
         do_status
         ;;
     pull)
+        # synchronous pull (CLI use)
         image_present || pull_image
+        ;;
+    bgpull)
+        # detached background pull; returns immediately (App Center use)
+        image_present || spawn_bgpull
         ;;
     update)
         do_update
@@ -351,22 +373,46 @@ case "$1" in
     remove)
         do_remove
         ;;
-    _run_after_pull)
-        # internal: invoked by the background pull once the image exists
-        if container_exists || run_container; then
-            write_status "running"
-            log "Roon image downloaded; Roon Server container created and started (host network)." 4
+    diag)
+        echo "docker CLI : $DOCKER"
+        "$DOCKER" version 2>&1 | head -n 6
+        echo "--- ghcr.io DNS ---"
+        nslookup ghcr.io 2>&1 | head -n 6
+        echo "--- roon/busybox images ---"
+        "$DOCKER" images 2>/dev/null | grep -E 'REPOSITORY|roon|busybox'
+        echo "--- containers ---"
+        "$DOCKER" ps -a 2>/dev/null | grep -E 'CONTAINER|roon'
+        echo "--- data path ---"
+        echo "ROON_DATA_PATH=$ROON_DATA_PATH (media: $(data_media_type "$ROON_DATA_PATH"))"
+        echo "--- last pull log ($PULL_LOG) ---"
+        tail -n 20 "$PULL_LOG" 2>/dev/null || echo "(no pull log yet)"
+        ;;
+    _bg_pull)
+        # internal, runs detached: pull with live progress for the UI
+        PIDFILE="$LOG_DIR/pull.pid"
+        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+            exit 0  # a pull is already running
+        fi
+        echo $$ > "$PIDFILE"
+        write_status "downloading-image"
+        ( pull_image; echo $? > "$LOG_DIR/pull.rc" ) &
+        PULL_JOB=$!
+        while kill -0 "$PULL_JOB" 2>/dev/null; do
+            tail -n 15 "$PULL_LOG" > "$WEB_DIR/pull-progress.txt" 2>/dev/null
+            sleep 5
+        done
+        rm -f "$PIDFILE"
+        if [ "$(cat "$LOG_DIR/pull.rc" 2>/dev/null)" = "0" ]; then
+            rm -f "$WEB_DIR/pull-progress.txt"
+            finish_after_pull
         else
-            write_status "error"
-            log "Image downloaded but the container could not be created. See $LOG_FILE." 1
+            tail -n 15 "$PULL_LOG" > "$WEB_DIR/pull-progress.txt" 2>/dev/null
+            write_status "pull-failed"
+            log "Downloading the Roon image failed. Run '$QPKG_ROOT/roon-server-docker.sh diag' to check DNS/registry access, then restart the app. Details: $PULL_LOG" 1
         fi
         ;;
-    _pull_failed)
-        write_status "pull-failed"
-        log "Downloading the Roon image failed. Check the NAS internet connection and $PULL_LOG, then restart the app." 1
-        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|pull|update|remove}"
+        echo "Usage: $0 {start|stop|restart|status|pull|bgpull|update|remove|diag}"
         exit 1
         ;;
 esac
