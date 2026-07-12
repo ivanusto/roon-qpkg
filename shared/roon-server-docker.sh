@@ -37,6 +37,10 @@ INBOX_DIR="$QPKG_ROOT/inbox"
 
 mkdir -p "$LOG_DIR" 2>/dev/null
 
+# Detached background jobs can inherit a deleted cwd (App Center's temp
+# extract dir), which makes every subshell print getcwd errors.
+cd / 2>/dev/null
+
 # ---------------------------------------------------------------- utils
 
 log() {
@@ -102,6 +106,7 @@ load_conf() {
     ROON_STOP_TIMEOUT="${ROON_STOP_TIMEOUT:-120}"
     ROON_UI_PORT="${ROON_UI_PORT:-18630}"
     ROON_UI_IMAGE="${ROON_UI_IMAGE:-busybox:stable}"
+    CS_WAIT_TIMEOUT="${CS_WAIT_TIMEOUT:-900}"
     UI_NAME="${ROON_CONTAINER_NAME}-ui"
 }
 
@@ -179,7 +184,22 @@ container_net_mode() {
     "$DOCKER" inspect -f '{{.HostConfig.NetworkMode}}' "$ROON_CONTAINER_NAME" 2>/dev/null
 }
 
+# "docker run" hit an existing container with our name: right after boot
+# the object store can hide a container from inspect for a while, so the
+# exists-guard misses it and run collides. The container is fine — start it.
+name_conflict() {
+    echo "$1" | grep -qi "is already in use by container"
+}
+
 run_container() {
+    # Idempotent: an existing container is started, never "docker run"
+    # over (that yields a name Conflict); recreate only if start fails.
+    if container_exists; then
+        container_running && return 0
+        "$DOCKER" start "$ROON_CONTAINER_NAME" >/dev/null 2>&1 && return 0
+        log "Existing Roon container failed to start; recreating it (database is kept)." 2
+        "$DOCKER" rm -f "$ROON_CONTAINER_NAME" >/dev/null 2>&1
+    fi
     mkdir -p "$ROON_DATA_PATH"
     [ -n "$ROON_BACKUP_PATH" ] && mkdir -p "$ROON_BACKUP_PATH"
     if [ ! -d "$ROON_MUSIC_PATH" ]; then
@@ -193,7 +213,7 @@ run_container() {
 
     # --net=host is mandatory: Roon uses LAN multicast/broadcast (RAAT)
     # to discover audio endpoints and remote-control apps. Do not change.
-    "$DOCKER" run -d \
+    OUT=$("$DOCKER" run -d \
         --name "$ROON_CONTAINER_NAME" \
         --net=host \
         --restart unless-stopped \
@@ -202,7 +222,14 @@ run_container() {
         -v "$ROON_MUSIC_PATH":/Music \
         ${ROON_BACKUP_PATH:+-v "$ROON_BACKUP_PATH":/RoonBackups} \
         $ROON_EXTRA_ARGS \
-        "$ROON_IMAGE" >/dev/null
+        "$ROON_IMAGE" 2>&1 >/dev/null)
+    RC=$?
+    if [ $RC -ne 0 ] && name_conflict "$OUT"; then
+        # the container was there all along, just invisible to inspect
+        "$DOCKER" start "$ROON_CONTAINER_NAME" >/dev/null 2>&1 && return 0
+    fi
+    [ $RC -eq 0 ] || log "Failed to create the Roon container: $OUT" 1
+    return $RC
 }
 
 # ----- status-page container (busybox httpd on ROON_UI_PORT) ---------
@@ -241,24 +268,40 @@ start_ui() {
     # cannot create a /www/inbox mountpoint inside an ro bind mount
     # ("read-only file system"), and this also keeps the pending file
     # from being served over HTTP.
+    # Host networking on purpose: a dockerd-managed -p binding can leak
+    # (dockerd keeps the port bound after the container is force-removed
+    # during daemon churn, blocking the UI until the daemon restarts).
+    # With --net host the socket dies with httpd.
     UI_ERR=$("$DOCKER" run -d \
         --name "$UI_NAME" \
         --restart unless-stopped \
-        -p "$ROON_UI_PORT":80 \
+        --net host \
         -v "$WEB_DIR":/www:ro \
         -v "$INBOX_DIR":/inbox \
-        "$ROON_UI_IMAGE" httpd -f -p 80 -h /www 2>&1 >/dev/null) \
+        "$ROON_UI_IMAGE" httpd -f -p "$ROON_UI_PORT" -h /www 2>&1 >/dev/null) \
         || log "Failed to start the status-page container on port $ROON_UI_PORT: $UI_ERR — if the port is taken, set ROON_UI_PORT in $ROON_CONF to a free port and restart." 2
     # Keep the App Center / desktop icon pointing at the right port.
     /sbin/setcfg "$QPKG_NAME" Web_Port "$ROON_UI_PORT" -f "$CONF" 2>/dev/null
 }
 
+# A daemon hiccup can orphan the host-net httpd while removing its
+# container record, leaving ROON_UI_PORT bound by a process docker no
+# longer knows about. Kill strays by their exact cmdline signature —
+# SIGKILL, because the httpd is PID 1 of its namespace and ignores TERM.
+kill_stray_httpd() {
+    for PID in $(ps 2>/dev/null | grep "httpd -f -p $ROON_UI_PORT" | grep -v grep | awk '{print $1}'); do
+        kill -9 "$PID" 2>/dev/null
+    done
+}
+
 stop_ui() {
     "$DOCKER" stop "$UI_NAME" >/dev/null 2>&1
+    kill_stray_httpd
 }
 
 remove_ui() {
     "$DOCKER" rm -f "$UI_NAME" >/dev/null 2>&1
+    kill_stray_httpd
 }
 
 # ---------------------------------------------------------------- flow
@@ -268,16 +311,64 @@ pull_image() {
     "$DOCKER" pull "$ROON_IMAGE" >> "$PULL_LOG" 2>&1
 }
 
-# Spawn a fully detached background pull. setsid puts the job in its
-# own session so it survives App Center killing the install/start
-# script's process group (plain nohup children can be reaped with it,
-# leaving the pull never actually running).
-spawn_bgpull() {
+# Spawn a fully detached background job ($1 = internal command). setsid
+# puts the job in its own session so it survives App Center killing the
+# install/start script's process group (plain nohup children can be
+# reaped with it, leaving the job never actually running).
+spawn_detached() {
     SELF="$QPKG_ROOT/roon-server-docker.sh"
     if command -v setsid >/dev/null 2>&1; then
-        setsid "$SELF" _bg_pull </dev/null >/dev/null 2>&1 &
+        setsid "$SELF" "$1" </dev/null >/dev/null 2>&1 &
     else
-        nohup "$SELF" _bg_pull </dev/null >/dev/null 2>&1 &
+        nohup "$SELF" "$1" </dev/null >/dev/null 2>&1 &
+    fi
+}
+
+spawn_bgpull() {
+    spawn_detached _bg_pull
+}
+
+# True once Container Station's docker daemon answers queries against
+# its object store. "docker info" alone is NOT enough: right after CS
+# starts it can answer info while inspect/images still come up empty.
+docker_ready() {
+    [ -n "$DOCKER" ] || DOCKER=$(find_docker)
+    [ -n "$DOCKER" ] || return 1
+    "$DOCKER" info >/dev/null 2>&1 && "$DOCKER" ps -q >/dev/null 2>&1
+}
+
+# Wait up to $1 seconds (default CS_WAIT_TIMEOUT) for the docker daemon.
+# Needed at boot: this init script can run before Container Station has
+# finished starting. Requires two consecutive successful polls 10s apart
+# so a daemon that is up but still settling doesn't slip through.
+wait_docker_ready() {
+    LIMIT="${1:-$CS_WAIT_TIMEOUT}"
+    WAITED=0
+    OK=0
+    while :; do
+        if docker_ready; then
+            OK=$((OK + 1))
+            [ "$OK" -ge 2 ] && return 0
+            # mid-confirmation: never abort on the timeout boundary here
+        else
+            OK=0
+            [ "$WAITED" -ge "$LIMIT" ] && return 1
+        fi
+        sleep 10
+        WAITED=$((WAITED + 10))
+    done
+}
+
+# Start now if the container engine is up; otherwise finish the start
+# in a detached background job once it is (never block the QTS boot
+# sequence, and never mistake "daemon not up yet" for "image missing").
+start_or_defer() {
+    if docker_ready; then
+        do_start
+    else
+        write_status "waiting-for-container-station"
+        log "Container Station is not ready yet; Roon Server will start automatically as soon as it is." 4
+        spawn_detached _bg_start
     fi
 }
 
@@ -376,7 +467,9 @@ apply_pending() {
 finish_after_pull() {
     # settings may have changed while the image was downloading
     [ -f "$ROON_CONF" ] && . "$ROON_CONF"
-    if container_exists || run_container; then
+    load_conf
+    if run_container; then
+        touch "$QPKG_ROOT/.images-ready"
         write_status "running"
         log "Roon image downloaded; Roon Server container created and started (host network)." 4
     else
@@ -385,31 +478,28 @@ finish_after_pull() {
     fi
 }
 
+# Only ever called with the docker daemon confirmed up (start_or_defer /
+# _bg_start / finish_after_pull gate on docker_ready first).
 do_start() {
     MEDIA=$(ssd_advice)
     write_status "starting" "$MEDIA"
     write_shares
     start_ui
 
-    if container_exists; then
-        # Guarantee host networking even if the container was altered
-        # from the Container Station UI.
-        if [ "$(container_net_mode)" != "host" ]; then
-            log "Existing container is not in host network mode; recreating it with --net=host (required for Roon device/remote discovery)." 2
-            "$DOCKER" rm -f "$ROON_CONTAINER_NAME" >/dev/null 2>&1
-            run_container || { write_status "error"; log "Failed to recreate the Roon container. See $LOG_FILE and $PULL_LOG." 1; return 1; }
-        elif ! container_running; then
-            "$DOCKER" start "$ROON_CONTAINER_NAME" >/dev/null || { write_status "error"; log "Failed to start the Roon container." 1; return 1; }
-        fi
-        write_status "running" "$MEDIA"
-        log "Roon Server started (container '$ROON_CONTAINER_NAME', host network)." 4
-        return 0
+    # Guarantee host networking even if the container was altered
+    # from the Container Station UI.
+    if container_exists && [ "$(container_net_mode)" != "host" ]; then
+        log "Existing container is not in host network mode; recreating it with --net=host (required for Roon device/remote discovery)." 2
+        "$DOCKER" rm -f "$ROON_CONTAINER_NAME" >/dev/null 2>&1
     fi
 
-    if image_present; then
-        run_container || { write_status "error"; log "Failed to create the Roon container." 1; return 1; }
+    # run_container is idempotent: an existing container is started (or
+    # recreated if broken), otherwise it is created from the image.
+    if container_exists || image_present; then
+        run_container || { write_status "error"; log "Failed to start the Roon container. See $LOG_FILE and $PULL_LOG." 1; return 1; }
+        touch "$QPKG_ROOT/.images-ready"
         write_status "running" "$MEDIA"
-        log "Roon Server container created and started (host network, data: $ROON_DATA_PATH)." 4
+        log "Roon Server started (container '$ROON_CONTAINER_NAME', host network)." 4
     else
         pull_and_run_bg
     fi
@@ -430,6 +520,7 @@ do_remove() {
         "$DOCKER" rm -f "$ROON_CONTAINER_NAME" >/dev/null 2>&1
     fi
     remove_ui
+    rm -f "$QPKG_ROOT/.images-ready"
     log "Roon containers removed. Your Roon database in '$ROON_DATA_PATH' was kept." 4
 }
 
@@ -457,9 +548,15 @@ do_status() {
 
 DOCKER=$(find_docker)
 if [ -z "$DOCKER" ]; then
-    log "Container Station docker CLI not found. Please install/enable Container Station and restart this app." 1
-    write_status "no-container-engine"
-    [ "$1" = "start" ] && exit 1
+    # Not fatal for start/restart: at boot the CLI may not be reachable
+    # yet — start_or_defer waits for Container Station in the background.
+    case "$1" in
+        start|restart|_bg_start) ;;
+        *)
+            log "Container Station docker CLI not found. Please install/enable Container Station and restart this app." 1
+            write_status "no-container-engine"
+            ;;
+    esac
 fi
 
 load_conf
@@ -468,14 +565,14 @@ case "$1" in
     start)
         ENABLED=$(/sbin/getcfg "$QPKG_NAME" Enable -u -d FALSE -f "$CONF")
         [ "$ENABLED" = "TRUE" ] || { echo "$QPKG_NAME is disabled."; exit 1; }
-        do_start
+        start_or_defer
         ;;
     stop)
         do_stop
         ;;
     restart)
         do_stop
-        do_start
+        start_or_defer
         ;;
     status)
         do_status
@@ -512,15 +609,55 @@ case "$1" in
         echo "--- last pull log ($PULL_LOG) ---"
         tail -n 20 "$PULL_LOG" 2>/dev/null || echo "(no pull log yet)"
         ;;
+    _bg_start)
+        # internal, runs detached from start/restart when the container
+        # engine is not up yet (typically during boot): wait for it,
+        # then do the real start.
+        if wait_docker_ready; then
+            # The daemon answers ps/info while its object store is still
+            # loading, making existing containers/images look missing
+            # (observed to last minutes after boot). The .images-ready
+            # marker proves this app ran successfully before, so in that
+            # case absence can only mean "store not loaded yet" — keep
+            # waiting instead of falling into the download path.
+            SETTLE=0
+            LIMIT=60
+            [ -f "$QPKG_ROOT/.images-ready" ] && LIMIT="$CS_WAIT_TIMEOUT"
+            while [ "$SETTLE" -lt "$LIMIT" ]; do
+                container_exists && break
+                image_present && break
+                sleep 10
+                SETTLE=$((SETTLE + 10))
+            done
+            do_start
+        else
+            write_status "no-container-engine"
+            log "Container Station did not become ready within ${CS_WAIT_TIMEOUT}s. Start this app from App Center once Container Station is running." 1
+        fi
+        ;;
     _bg_pull)
         # internal, runs detached: pull with live progress for the UI
+        if ! wait_docker_ready; then
+            write_status "no-container-engine"
+            log "Container Station did not become ready within ${CS_WAIT_TIMEOUT}s; image download not started. Start this app from App Center once Container Station is running." 1
+            exit 1
+        fi
         PIDFILE="$LOG_DIR/pull.pid"
         if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
             exit 0  # a pull is already running
         fi
         echo $$ > "$PIDFILE"
         write_status "downloading-image"
-        ( pull_image; echo $? > "$LOG_DIR/pull.rc" ) &
+        # Registry access / DNS can still be settling right after boot —
+        # retry transient pull failures before declaring defeat.
+        ( ATTEMPT=1
+          while :; do
+              pull_image && { echo 0 > "$LOG_DIR/pull.rc"; break; }
+              [ "$ATTEMPT" -ge 3 ] && { echo 1 > "$LOG_DIR/pull.rc"; break; }
+              ATTEMPT=$((ATTEMPT + 1))
+              echo "$(date '+%Y-%m-%d %H:%M:%S') pull failed; retry $ATTEMPT/3 in 30s" >> "$PULL_LOG"
+              sleep 30
+          done ) &
         PULL_JOB=$!
         while kill -0 "$PULL_JOB" 2>/dev/null; do
             tail -n 15 "$PULL_LOG" > "$WEB_DIR/pull-progress.txt" 2>/dev/null

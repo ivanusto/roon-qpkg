@@ -46,6 +46,11 @@
 # Image used for the status-page container.
 #ROON_UI_IMAGE="busybox:stable"
 
+# Seconds to wait for Container Station's docker daemon at boot before
+# giving up (the app start is deferred in the background meanwhile, so
+# this never delays the QTS boot sequence).
+#CS_WAIT_TIMEOUT="900"
+
 # Extra "docker run" arguments (advanced).
 # NOTE: the network mode is fixed to --net=host by the service
 # script and cannot be overridden here — Roon's device & remote
