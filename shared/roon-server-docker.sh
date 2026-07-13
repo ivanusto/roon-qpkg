@@ -206,7 +206,7 @@ run_container() {
         # Never create directories directly under /share — that root is
         # tmpfs on QTS and anything made there vanishes on reboot.
         FALLBACK="$(default_volume)/RoonServer/music"
-        log "Music path '$ROON_MUSIC_PATH' does not exist. Using '$FALLBACK' for now — set your real music share on the status page (資料夾設定)." 2
+        log "Music path '$ROON_MUSIC_PATH' does not exist. Using '$FALLBACK' for now — set your real music share on the status page (folder settings)." 2
         ROON_MUSIC_PATH="$FALLBACK"
         mkdir -p "$ROON_MUSIC_PATH"
     fi

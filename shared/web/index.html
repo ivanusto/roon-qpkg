@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,7 +14,7 @@
   .wrap{max-width:880px;margin:0 auto;padding:32px 20px 64px}
   header{display:flex;align-items:center;gap:16px;margin-bottom:28px}
   .logo{width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#7b5cff,#3d7bff);display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:700;color:#fff}
-  h1{font-size:22px;margin:0}
+  h1{font-size:22px;margin:0;flex-grow:1}
   h1 small{display:block;font-size:13px;font-weight:400;color:var(--muted)}
   .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin-bottom:18px}
   .card h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
@@ -40,127 +40,244 @@
   button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 22px;font-size:14px;font-weight:600;cursor:pointer;margin-top:14px}
   button:hover{filter:brightness(1.1)}
   #save-msg{margin-left:12px;font-size:13px}
+  
+  .lang-switch{display:flex;gap:4px;font-size:12px;background:var(--card2);border:1px solid var(--border);padding:3px;border-radius:18px;margin-left:auto;align-self:center}
+  .lang-btn{color:var(--muted);cursor:pointer;padding:3px 10px;border-radius:14px;transition:all .15s ease}
+  .lang-btn:hover{color:var(--text)}
+  .lang-btn.active{background:var(--accent);color:#fff;font-weight:600}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div class="logo">R</div>
-    <h1>Roon Server <small>官方 Docker 映像 · Container Station · QPKG 管理外殼</small></h1>
+    <h1>Roon Server <small id="sub-title">Official Docker Image · Container Station · QPKG Management Wrapper</small></h1>
+    <div class="lang-switch">
+      <span class="lang-btn" id="btn-en" onclick="setLang('en')">English</span>
+      <span class="lang-btn" id="btn-zh" onclick="setLang('zh')">繁體中文</span>
+    </div>
   </header>
 
   <div class="card">
-    <h2>目前狀態 <span id="state" class="pill warn">讀取中…</span></h2>
+    <h2><span id="txt-status">Current Status</span> <span id="state" class="pill warn">Loading...</span></h2>
     <table id="info">
-      <tr><td>容器</td><td id="f-container">–</td></tr>
-      <tr><td>映像檔</td><td id="f-image">–</td></tr>
-      <tr><td>網路模式</td><td><code>host</code>（由套件強制，不可修改）</td></tr>
-      <tr><td>資料庫 / 快取（/Roon）</td><td id="f-data">–</td></tr>
-      <tr><td>音樂庫（/Music）</td><td id="f-music">–</td></tr>
-      <tr><td>備份（/RoonBackups）</td><td id="f-backup">–</td></tr>
-      <tr><td>時區</td><td id="f-tz">–</td></tr>
-      <tr><td>狀態更新時間</td><td id="f-updated">–</td></tr>
+      <tr><td id="lbl-container">Container</td><td id="f-container">–</td></tr>
+      <tr><td id="lbl-image">Image</td><td id="f-image">–</td></tr>
+      <tr><td id="lbl-network">Network Mode</td><td id="lbl-network-val"><code>host</code> (enforced by app, read-only)</td></tr>
+      <tr><td id="lbl-data">Database / Cache (/Roon)</td><td id="f-data">–</td></tr>
+      <tr><td id="lbl-music">Music Library (/Music)</td><td id="f-music">–</td></tr>
+      <tr><td id="lbl-backup">Backup (/RoonBackups)</td><td id="f-backup">–</td></tr>
+      <tr><td id="lbl-tz">Time Zone</td><td id="f-tz">–</td></tr>
+      <tr><td id="lbl-updated">Status Updated At</td><td id="f-updated">–</td></tr>
     </table>
     <div id="ssd-banner"></div>
     <div id="pull-box" style="display:none">
-      <p class="muted" style="margin-bottom:4px">映像檔下載進度（每 10 秒自動更新）：</p>
+      <p class="muted" style="margin-bottom:4px" id="lbl-pull-progress">Image download progress (auto-updates every 10s):</p>
       <pre id="pull-pre" style="max-height:220px;overflow:auto"></pre>
     </div>
-    <p class="muted">此頁每 10 秒自動更新；即時容器狀態請開啟 Container Station。Roon 本身沒有網頁介面，請使用 Roon 桌面／行動 App 連線。</p>
+    <p class="muted" id="lbl-status-desc">This page auto-updates every 10 seconds. For real-time container status, open Container Station. Roon itself does not have a web UI; use the Roon desktop/mobile App to connect.</p>
   </div>
 
   <div class="card">
-    <h2>⚠️ 為什麼強制使用 host 網路模式？</h2>
-    <p style="font-size:14px">
-      Roon 透過<b>區網多播（multicast）／廣播</b>來探索串流播放裝置（RAAT 端點、Roon Ready 器材、AirPlay/Chromecast）
-      以及遙控器 App。若容器使用 bridge/NAT 網路，多播封包無法跨越 NAT 邊界，
-      <b>裝置探索與遙控器連線會完全失效</b>。因此本套件在每次啟動時都會檢查容器是否為
-      <code>--net=host</code>，若被改動會自動以 host 模式重建容器。請勿在 Container Station 中修改此設定。
+    <h2 id="h-why-host">⚠️ Why is Host Network Mode Enforced?</h2>
+    <p style="font-size:14px" id="p-why-host-desc">
+      Roon relies on <b>local network multicast/broadcast</b> (RAAT protocol) to discover audio output devices (Roon Ready, AirPlay, Chromecast) and remote control apps. If the container uses bridge/NAT network, multicast packets are blocked, <b>rendering device discovery and remote control entirely non-functional</b>. Therefore, this app checks for <code>--net=host</code> on every start; if altered, it will automatically recreate the container in host mode. Do not modify this setting in Container Station.
     </p>
   </div>
 
   <div class="card">
-    <h2>💾 資料庫請放在 SSD 儲存池</h2>
-    <p style="font-size:14px">
-      Roon 資料庫與快取（掛載到容器內的 <code>/Roon</code>）充滿小型隨機讀寫。放在傳統硬碟（HDD）磁碟區時，
-      隨機讀寫延遲會造成<b>音訊解碼不順、播放清單與媒體庫載入緩慢、搜尋卡頓</b>。
+    <h2 id="h-ssd">💾 Please Keep Database on SSD Storage Pool</h2>
+    <p style="font-size:14px" id="p-ssd-desc">
+      The Roon database and cache (mounted as <code>/Roon</code> inside the container) perform heavy small-block random reads/writes. Storing them on a mechanical hard drive (HDD) volume causes high latency, leading to <b>stuttering audio playback, slow playlist/library loading, and sluggish searches</b>.
     </p>
-    <div class="callout warn">
-      <b>設定方式：</b>編輯 QPKG 安裝目錄下的 <code>roon.conf</code>，將
-      <code>ROON_DATA_PATH</code> 指向 SSD 磁碟區上的路徑（例如
-      <code>/share/CACHEDEV2_DATA/RoonServer/data</code>），再重新啟動本套件。
+    <div class="callout warn" id="callout-ssd-cfg">
+      <b>Configuration:</b> Edit <code>roon.conf</code> in the QPKG installation directory and point <code>ROON_DATA_PATH</code> to a path on an SSD volume (e.g. <code>/share/CACHEDEV2_DATA/RoonServer/data</code>), then restart the app.
     </div>
     <ol>
-      <li>「儲存與快照總管」確認哪個磁碟區位於 SSD 儲存池（純 SSD 池，非 SSD 快取）。</li>
-      <li>SSH 登入 NAS，編輯 <code>&lt;QPKG 安裝目錄&gt;/roon.conf</code>：<br>
-        <code>ROON_DATA_PATH="/share/CACHEDEV2_DATA/RoonServer/data"</code></li>
-      <li>若要搬移既有資料庫：先停止套件，將舊資料夾整個複製到新路徑，再啟動。</li>
-      <li>App Center 重新啟動 Roon Server，或執行 <code>/etc/init.d/roon-server-docker.sh restart</code>。</li>
+      <li id="li-ssd-1">In "Storage & Snapshots Manager", check which volume resides on an SSD storage pool (must be a pure SSD pool; SSD cache does not count).</li>
+      <li id="li-ssd-2">Log in to the NAS via SSH and edit <code>&lt;QPKG Root&gt;/roon.conf</code>:<br><code>ROON_DATA_PATH="/share/CACHEDEV2_DATA/RoonServer/data"</code></li>
+      <li id="li-ssd-3">To migrate an existing database: Stop the app first, copy the entire data folder to the new path, and start the app again.</li>
+      <li id="li-ssd-4">Restart Roon Server in App Center, or run <code>/etc/init.d/roon-server-docker.sh restart</code>.</li>
     </ol>
   </div>
 
   <div class="card">
-    <h2>📁 資料夾設定</h2>
-    <p style="font-size:14px" class="muted">
-      直接在此設定掛載路徑，儲存後<b>約 1 分鐘內</b>自動套用並重建容器
-      （Roon 資料庫保留；變更資料庫路徑<b>不會</b>自動搬移舊資料）。
-      輸入框會提示 NAS 上現有的共享資料夾。
+    <h2 id="h-folder-cfg">📁 Folder Settings</h2>
+    <p style="font-size:14px" class="muted" id="p-folder-cfg-desc">
+      Configure mount paths directly. Changes are applied automatically and the container is rebuilt <b>within 1 minute</b> (the Roon database is preserved; changing the database path <b>does not</b> automatically migrate existing data). Input boxes will suggest existing shared folders on the NAS.
     </p>
     <datalist id="share-list"></datalist>
-    <label for="in-music">音樂庫（掛載到容器 <code>/Music</code>）— 指向你放音樂的共享資料夾</label>
+    <label for="in-music" id="lbl-in-music">Music Library (mounted as <code>/Music</code> in container) — Points to the shared folder containing your music</label>
     <input type="text" id="in-music" list="share-list" placeholder="/share/Music">
-    <label for="in-data">Roon 資料庫／快取（掛載到 <code>/Roon</code>）— 請放在 SSD 磁碟區</label>
+    <label for="in-data" id="lbl-in-data">Roon Database / Cache (mounted as <code>/Roon</code>) — Please store on an SSD volume</label>
     <input type="text" id="in-data" list="share-list" placeholder="/share/CACHEDEV2_DATA/RoonServer/data">
-    <label for="in-backup">備份（掛載到 <code>/RoonBackups</code>，留空 = 不掛載）</label>
+    <label for="in-backup" id="lbl-in-backup">Backup (mounted as <code>/RoonBackups</code>, leave empty to not mount)</label>
     <input type="text" id="in-backup" list="share-list" placeholder="">
     <br>
-    <button id="save-btn">儲存設定</button><span id="save-msg"></span>
-    <div class="callout" style="margin-top:14px">
-      <b>在 Roon App 中請用「新增資料夾」選 <code>/Music</code>。</b>
-      不要用「新增網路共享位址（SMB）」——Roon 跑在容器內，無法掛載 SMB
-      （會出現 UnexpectedError），而且音樂已由本套件直接掛載到 <code>/Music</code>，不需繞道網路。
+    <button id="save-btn">Save Settings</button><span id="save-msg"></span>
+    <div class="callout" style="margin-top:14px" id="callout-roon-app">
+      <b>In Roon App, select "Add folder" and choose <code>/Music</code>.</b> Do not use "Add network share (SMB)" — Roon runs inside a container and cannot mount SMB shares (results in UnexpectedError). Your music is already directly mounted to <code>/Music</code> by this app, so no network routing is needed.
     </div>
   </div>
 
   <div class="card">
-    <h2>🚀 首次使用</h2>
+    <h2 id="h-first-time">🚀 Getting Started</h2>
     <ol>
-      <li>安裝完成後，套件會於<b>背景</b>呼叫 Container Station 下載官方映像檔
-        <code>ghcr.io/roonlabs/roonserver:latest</code>，完成後自動建立並啟動容器（視網速約數分鐘）。</li>
-      <li>在同一區網的電腦／平板安裝 <a href="https://roon.app/downloads" target="_blank" rel="noopener">Roon App</a>，
-        它會自動找到這台 NAS 上的 Roon Server（host 網路 + 多播探索）。</li>
-      <li>登入 Roon 帳號，於「設定 → 儲存位置」按「<b>新增資料夾</b>」選擇容器內的 <code>/Music</code>（勿使用 SMB 網路共享）。</li>
-      <li>建議在 Roon「設定 → 備份」把備份目的地設為 <code>/RoonBackups</code>。</li>
+      <li id="li-ft-1">Upon installation, the app calls Container Station in the <b>background</b> to download the official image <code>ghcr.io/roonlabs/roonserver:latest</code>. The container is created and started automatically once complete (takes a few minutes depending on network speed).</li>
+      <li id="li-ft-2">Install the <a href="https://roon.app/downloads" target="_blank" rel="noopener">Roon App</a> on a computer or tablet connected to the same network. It will discover the Roon Server on this NAS automatically (via host network & multicast discovery).</li>
+      <li id="li-ft-3">Log in to your Roon account, go to "Settings → Storage", click "<b>Add folder</b>", and select <code>/Music</code> inside the container (do not use SMB network sharing).</li>
+      <li id="li-ft-4">It is recommended to set your backup destination to <code>/RoonBackups</code> under "Settings → Backups" in Roon.</li>
     </ol>
-    <p class="muted">下載進度：<code>&lt;QPKG 安裝目錄&gt;/logs/pull.log</code>；服務記錄：<code>logs/roon-server.log</code>。</p>
+    <p class="muted" id="p-log-paths">Download progress: <code>&lt;QPKG Root&gt;/logs/pull.log</code>; Service log: <code>logs/roon-server.log</code>.</p>
   </div>
 
   <div class="card">
-    <h2>🔧 常用維護指令（SSH）</h2>
-    <pre>/etc/init.d/roon-server-docker.sh status    # 檢視狀態
-/etc/init.d/roon-server-docker.sh restart   # 重新啟動
-/etc/init.d/roon-server-docker.sh update    # 更新官方映像並重建容器（資料庫保留）</pre>
+    <h2 id="h-commands">🔧 Useful Maintenance Commands (SSH)</h2>
+    <pre id="pre-commands">/etc/init.d/roon-server-docker.sh status    # Check status
+/etc/init.d/roon-server-docker.sh restart   # Restart
+/etc/init.d/roon-server-docker.sh update    # Update official image & rebuild container (database is kept)</pre>
   </div>
 
-  <p class="muted">
-    本套件僅包含管理指令碼與此狀態頁，不內含任何 Roon 程式；Roon Server 由
-    <a href="https://github.com/RoonLabs/roon-docker" target="_blank" rel="noopener">RoonLabs 官方映像</a> 提供。
-    套件結構參考 <a href="https://github.com/qnap-dev/containerized-qpkg" target="_blank" rel="noopener">qnap-dev/containerized-qpkg</a>。
+  <p class="muted" id="p-footer">
+    This app contains only management scripts and this status page, not the Roon software itself. Roon Server is provided by the <a href="https://github.com/RoonLabs/roon-docker" target="_blank" rel="noopener">official RoonLabs Docker image</a>. Package structure is based on <a href="https://github.com/qnap-dev/containerized-qpkg" target="_blank" rel="noopener">qnap-dev/containerized-qpkg</a>.
   </p>
 </div>
 
 <script>
 (function(){
-  var stateMap = {
-    "running":            ["ok",   "執行中"],
-    "stopped":            ["warn", "已停止"],
-    "downloading-image":  ["warn", "映像檔下載中…"],
-    "waiting-for-container-station": ["warn", "等待 Container Station 啟動…"],
-    "pull-failed":        ["err",  "映像檔下載失敗"],
-    "no-container-engine":["err",  "找不到 Container Station"],
-    "error":              ["err",  "發生錯誤"]
+  var i18n = {
+    en: {
+      subtitle: "Official Docker Image · Container Station · QPKG Management Wrapper",
+      statusTitle: "Current Status",
+      lblContainer: "Container",
+      lblImage: "Image",
+      lblNetwork: "Network Mode",
+      lblNetworkVal: "<code>host</code> (enforced by app, read-only)",
+      lblData: "Database / Cache (/Roon)",
+      lblMusic: "Music Library (/Music)",
+      lblBackup: "Backup (/RoonBackups)",
+      lblTz: "Time Zone",
+      lblUpdated: "Status Updated At",
+      lblPullProgress: "Image download progress (auto-updates every 10s):",
+      lblStatusDesc: "This page auto-updates every 10 seconds. For real-time container status, open Container Station. Roon itself does not have a web UI; use the Roon desktop/mobile App to connect.",
+      hWhyHost: "⚠️ Why is Host Network Mode Enforced?",
+      pWhyHostDesc: "Roon relies on <b>local network multicast/broadcast</b> (RAAT protocol) to discover audio output devices (Roon Ready, AirPlay, Chromecast) and remote control apps. If the container uses bridge/NAT network, multicast packets are blocked, <b>rendering device discovery and remote control entirely non-functional</b>. Therefore, this app checks for <code>--net=host</code> on every start; if altered, it will automatically recreate the container in host mode. Do not modify this setting in Container Station.",
+      hSsd: "💾 Please Keep Database on SSD Storage Pool",
+      pSsdDesc: "The Roon database and cache (mounted as <code>/Roon</code> inside the container) perform heavy small-block random reads/writes. Storing them on a mechanical hard drive (HDD) volume causes high latency, leading to <b>stuttering audio playback, slow playlist/library loading, and sluggish searches</b>.",
+      calloutSsdCfg: "<b>Configuration:</b> Edit <code>roon.conf</code> in the QPKG installation directory and point <code>ROON_DATA_PATH</code> to a path on an SSD volume (e.g. <code>/share/CACHEDEV2_DATA/RoonServer/data</code>), then restart the app.",
+      liSsd1: "In \"Storage & Snapshots Manager\", check which volume resides on an SSD storage pool (must be a pure SSD pool; SSD cache does not count).",
+      liSsd2: "Log in to the NAS via SSH and edit <code>&lt;QPKG Root&gt;/roon.conf</code>:<br><code>ROON_DATA_PATH=\"/share/CACHEDEV2_DATA/RoonServer/data\"</code>",
+      liSsd3: "To migrate an existing database: Stop the app first, copy the entire data folder to the new path, and start the app again.",
+      liSsd4: "Restart Roon Server in App Center, or run <code>/etc/init.d/roon-server-docker.sh restart</code>.",
+      hFolderCfg: "📁 Folder Settings",
+      pFolderCfgDesc: "Configure mount paths directly. Changes are applied automatically and the container is rebuilt <b>within 1 minute</b> (the Roon database is preserved; changing the database path <b>does not</b> automatically migrate existing data). Input boxes will suggest existing shared folders on the NAS.",
+      lblInMusic: "Music Library (mounted as <code>/Music</code> in container) — Points to the shared folder containing your music",
+      lblInData: "Roon Database / Cache (mounted as <code>/Roon</code>) — Please store on an SSD volume",
+      lblInBackup: "Backup (mounted as <code>/RoonBackups</code>, leave empty to not mount)",
+      saveBtn: "Save Settings",
+      calloutRoonApp: "<b>In Roon App, select \"Add folder\" and choose <code>/Music</code>.</b> Do not use \"Add network share (SMB)\" — Roon runs inside a container and cannot mount SMB shares (results in UnexpectedError). Your music is already directly mounted to <code>/Music</code> by this app, so no network routing is needed.",
+      hFirstTime: "🚀 Getting Started",
+      liFt1: "Upon installation, the app calls Container Station in the <b>background</b> to download the official image <code>ghcr.io/roonlabs/roonserver:latest</code>. The container is created and started automatically once complete (takes a few minutes depending on network speed).",
+      liFt2: "Install the <a href=\"https://roon.app/downloads\" target=\"_blank\" rel=\"noopener\">Roon App</a> on a computer or tablet connected to the same network. It will discover the Roon Server on this NAS automatically (via host network & multicast discovery).",
+      liFt3: "Log in to your Roon account, go to \"Settings → Storage\", click \"<b>Add folder</b>\", and select <code>/Music</code> inside the container (do not use SMB network sharing).",
+      liFt4: "It is recommended to set your backup destination to <code>/RoonBackups</code> under \"Settings → Backups\" in Roon.",
+      pLogPaths: "Download progress: <code>&lt;QPKG Root&gt;/logs/pull.log</code>; Service log: <code>logs/roon-server.log</code>.",
+      hCommands: "🔧 Useful Maintenance Commands (SSH)",
+      preCommands: "/etc/init.d/roon-server-docker.sh status    # Check status\n/etc/init.d/roon-server-docker.sh restart   # Restart\n/etc/init.d/roon-server-docker.sh update    # Update official image & rebuild container (database is kept)",
+      pFooter: "This app contains only management scripts and this status page, not the Roon software itself. Roon Server is provided by the <a href=\"https://github.com/RoonLabs/roon-docker\" target=\"_blank\" rel=\"noopener\">official RoonLabs Docker image</a>. Package structure is based on <a href=\"https://github.com/qnap-dev/containerized-qpkg\" target=\"_blank\" rel=\"noopener\">qnap-dev/containerized-qpkg</a>.",
+      saveMsgSaving: "Saving...",
+      saveMsgSuccess: "Saved. Rebuilding container within 1 minute.",
+      saveMsgFail: "Save failed, please try again.",
+      saveMsgOffline: "Save failed (connection lost).",
+      emptyVal: "(Not set)",
+      stateLoading: "Loading...",
+      bannerHdd: '<div class="callout warn"><b>⚠️ Database is currently on a mechanical hard drive (HDD) volume!</b> Please follow the instructions below to move <code>ROON_DATA_PATH</code> to an SSD storage pool to avoid playback and loading latency.</div>',
+      bannerSsd: '<div class="callout"><b>✅ Database is on an SSD volume</b>, random read/write latency is optimized.</div>',
+      bannerUnknown: '<div class="callout">Unable to determine database disk type. Please verify that <code>ROON_DATA_PATH</code> is on an SSD storage pool.</div>',
+      bannerOffline: '<div class="callout">No status (service not started yet)</div>'
+    },
+    zh: {
+      subtitle: "官方 Docker 映像 · Container Station · QPKG 管理外殼",
+      statusTitle: "目前狀態",
+      lblContainer: "容器",
+      lblImage: "映像檔",
+      lblNetwork: "網路模式",
+      lblNetworkVal: "<code>host</code>（由套件強制，不可修改）",
+      lblData: "資料庫 / 快取（/Roon）",
+      lblMusic: "音樂庫（/Music）",
+      lblBackup: "備份（/RoonBackups）",
+      lblTz: "時區",
+      lblUpdated: "狀態更新時間",
+      lblPullProgress: "映像檔下載進度（每 10 秒自動更新）：",
+      lblStatusDesc: "此頁每 10 秒自動更新；即時容器狀態請開啟 Container Station。Roon 本身沒有網頁介面，請使用 Roon 桌面／行動 App 連線。",
+      hWhyHost: "⚠️ 為什麼強制使用 host 網路模式？",
+      pWhyHostDesc: "Roon 透過<b>區網多播（multicast）／廣播</b>來探索串流播放裝置（RAAT 端點、Roon Ready 器材、AirPlay/Chromecast）以及遙控器 App。若容器使用 bridge/NAT 網路，多播封包無法跨越 NAT 邊界，<b>裝置探索與遙控器連線會完全失效</b>。因此本套件在每次啟動時都會檢查容器是否為 <code>--net=host</code>，若被改動會自動以 host 模式重建容器。請勿在 Container Station 中修改此設定。",
+      hSsd: "💾 資料庫請放在 SSD 儲存池",
+      pSsdDesc: "Roon 資料庫與快取（掛載到容器內的 <code>/Roon</code>）充滿小型隨機讀寫。放在傳統硬碟（HDD）磁碟區時，隨機讀寫延遲會造成<b>音訊解碼不順、播放清單與媒體庫載入緩慢、搜尋卡頓</b>。",
+      calloutSsdCfg: "<b>設定方式：</b>編輯 QPKG 安裝目錄下的 <code>roon.conf</code>，將 <code>ROON_DATA_PATH</code> 指向 SSD 磁碟區上的路徑（例如 <code>/share/CACHEDEV2_DATA/RoonServer/data</code>），再重新啟動本套件。",
+      liSsd1: "「儲存與快照總管」確認哪個磁碟區位於 SSD 儲存池（純 SSD 池，非 SSD 快取）。",
+      liSsd2: "SSH 登入 NAS，編輯 <code>&lt;QPKG 安裝目錄&gt;/roon.conf</code>：<br><code>ROON_DATA_PATH=\"/share/CACHEDEV2_DATA/RoonServer/data\"</code>",
+      liSsd3: "若要搬移既有資料庫：先停止套件，將舊資料夾整個複製到新路徑，再啟動。",
+      liSsd4: "App Center 重新啟動 Roon Server，或執行 <code>/etc/init.d/roon-server-docker.sh restart</code>。",
+      hFolderCfg: "📁 資料夾設定",
+      pFolderCfgDesc: "直接在此設定掛載路徑，儲存後<b>約 1 分鐘內</b>自動套用並重建容器（Roon 資料庫保留；變更資料庫路徑<b>不會</b>自動搬移舊資料）。輸入框會提示 NAS 上現有的共享資料夾。",
+      lblInMusic: "音樂庫（掛載到容器 <code>/Music</code>）— 指向你放音樂的共享資料夾",
+      lblInData: "Roon 資料庫／快取（掛載到 <code>/Roon</code>）— 請放在 SSD 磁碟區",
+      lblInBackup: "備份（掛載到 <code>/RoonBackups</code>，留空 = 不掛載）",
+      saveBtn: "儲存設定",
+      calloutRoonApp: "<b>在 Roon App 中請用「新增資料夾」選 <code>/Music</code>。</b>不要用「新增網路共享位址（SMB）」——Roon 跑在容器內，無法掛載 SMB（會出現 UnexpectedError），而且音樂已由本套件直接掛載到 <code>/Music</code>，不需繞道網路。",
+      hFirstTime: "🚀 首次使用",
+      liFt1: "安裝完成後，套件會於<b>背景</b>呼叫 Container Station 下載官方映像檔 <code>ghcr.io/roonlabs/roonserver:latest</code>，完成後自動建立並啟動容器（視網速約數分鐘）。",
+      liFt2: "在同一區網的電腦／平板安裝 <a href=\"https://roon.app/downloads\" target=\"_blank\" rel=\"noopener\">Roon App</a>，它會自動找到這台 NAS 上的 Roon Server（host 網路 + 多播探索）。",
+      liFt3: "登入 Roon 帳號，於「設定 → 儲存位置」按「<b>新增資料夾</b>」選擇容器內的 <code>/Music</code>（勿使用 SMB 網路共享）。",
+      liFt4: "建議在 Roon「設定 → 備份」把備份目的地設為 <code>/RoonBackups</code>。",
+      pLogPaths: "下載進度：<code>&lt;QPKG 安裝目錄&gt;/logs/pull.log</code>；服務記錄：<code>logs/roon-server.log</code>。",
+      hCommands: "🔧 常用維護指令（SSH）",
+      preCommands: "/etc/init.d/roon-server-docker.sh status    # 檢視狀態\n/etc/init.d/roon-server-docker.sh restart   # 重新啟動\n/etc/init.d/roon-server-docker.sh update    # 更新官方映像並重建容器（資料庫保留）",
+      pFooter: "本套件僅包含管理指令碼與此狀態頁，不內含任何 Roon 程式；Roon Server 由 <a href=\"https://github.com/RoonLabs/roon-docker\" target=\"_blank\" rel=\"noopener\">RoonLabs 官方映像</a> 提供。套件結構參考 <a href=\"https://github.com/qnap-dev/containerized-qpkg\" target=\"_blank\" rel=\"noopener\">qnap-dev/containerized-qpkg</a>。",
+      saveMsgSaving: "儲存中…",
+      saveMsgSuccess: "已儲存，約 1 分鐘內自動套用並重建容器。",
+      saveMsgFail: "儲存失敗，請重試。",
+      saveMsgOffline: "儲存失敗（無法連線）。",
+      emptyVal: "（未設定）",
+      stateLoading: "讀取中…",
+      bannerHdd: '<div class="callout warn"><b>⚠️ 資料庫目前位於傳統硬碟磁碟區！</b>請依下方說明將 <code>ROON_DATA_PATH</code> 移到 SSD 儲存池，以避免播放與載入延遲。</div>',
+      bannerSsd: '<div class="callout"><b>✅ 資料庫位於 SSD 磁碟區</b>，隨機讀寫延遲已最佳化。</div>',
+      bannerUnknown: '<div class="callout">無法自動判斷資料庫所在磁碟類型，請自行確認 <code>ROON_DATA_PATH</code> 位於 SSD 儲存池。</div>',
+      bannerOffline: '<div class="callout">尚無狀態（服務尚未啟動）</div>'
+    }
   };
-  function put(id, v){ document.getElementById(id).textContent = v || "（未設定）"; }
+
+  var stateMap = {
+    en: {
+      "running":            ["ok",   "Running"],
+      "stopped":            ["warn", "Stopped"],
+      "downloading-image":  ["warn", "Downloading image..."],
+      "waiting-for-container-station": ["warn", "Waiting for Container Station..."],
+      "pull-failed":        ["err",  "Download failed"],
+      "no-container-engine":["err",  "Container Station not found"],
+      "error":              ["err",  "Error"]
+    },
+    zh: {
+      "running":            ["ok",   "執行中"],
+      "stopped":            ["warn", "已停止"],
+      "downloading-image":  ["warn", "映像檔下載中…"],
+      "waiting-for-container-station": ["warn", "等待 Container Station 啟動…"],
+      "pull-failed":        ["err",  "映像檔下載失敗"],
+      "no-container-engine":["err",  "找不到 Container Station"],
+      "error":              ["err",  "發生錯誤"]
+    }
+  };
+
+  var currentLang = localStorage.getItem("roon_qpkg_lang") || "en";
+
+  window.setLang = function(lang) {
+    currentLang = lang;
+    localStorage.setItem("roon_qpkg_lang", lang);
+    updateUI();
+  };
+
+  function put(id, v){ document.getElementById(id).textContent = v || i18n[currentLang].emptyVal; }
   var prefilled = false;
   function prefill(s){
     if (prefilled) return;
@@ -169,6 +286,7 @@
     document.getElementById("in-data").value = s.data_path || "";
     document.getElementById("in-backup").value = s.backup_path || "";
   }
+  
   fetch("shares.json", {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(list){
     var dl = document.getElementById("share-list");
     list.forEach(function(p){
@@ -177,6 +295,7 @@
       dl.appendChild(o);
     });
   }).catch(function(){});
+
   document.getElementById("save-btn").addEventListener("click", function(){
     var body =
       "ROON_MUSIC_PATH="  + document.getElementById("in-music").value.trim()  + "\n" +
@@ -184,20 +303,21 @@
       "ROON_BACKUP_PATH=" + document.getElementById("in-backup").value.trim() + "\n";
     var msg = document.getElementById("save-msg");
     msg.style.color = "";
-    msg.textContent = "儲存中…";
+    msg.textContent = i18n[currentLang].saveMsgSaving;
     fetch("cgi-bin/save.cgi", {method:"POST", body: body}).then(function(r){ return r.text(); }).then(function(t){
       if (t.indexOf("OK") === 0) {
         msg.style.color = "var(--ok)";
-        msg.textContent = "已儲存，約 1 分鐘內自動套用並重建容器。";
+        msg.textContent = i18n[currentLang].saveMsgSuccess;
       } else {
         msg.style.color = "var(--err)";
-        msg.textContent = "儲存失敗，請重試。";
+        msg.textContent = i18n[currentLang].saveMsgFail;
       }
     }).catch(function(){
       msg.style.color = "var(--err)";
-      msg.textContent = "儲存失敗（無法連線）。";
+      msg.textContent = i18n[currentLang].saveMsgOffline;
     });
   });
+
   function loadPullProgress(show){
     var box = document.getElementById("pull-box");
     if (!show) { box.style.display = "none"; return; }
@@ -210,10 +330,10 @@
       }
     }).catch(function(){});
   }
-  function load(){
-  fetch("status.json", {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(s){
+
+  function applyStatus(s) {
     var el = document.getElementById("state");
-    var m = stateMap[s.state] || ["warn", s.state];
+    var m = stateMap[currentLang][s.state] || ["warn", s.state];
     el.className = "pill " + m[0];
     el.textContent = m[1];
     put("f-container", s.container);
@@ -224,21 +344,92 @@
     put("f-tz", s.tz);
     put("f-updated", s.updated_at);
     prefill(s);
+
     var banner = document.getElementById("ssd-banner");
+    var t = i18n[currentLang];
     if (s.data_media === "hdd") {
-      banner.innerHTML = '<div class="callout warn"><b>⚠️ 資料庫目前位於傳統硬碟磁碟區！</b>請依下方說明將 <code>ROON_DATA_PATH</code> 移到 SSD 儲存池，以避免播放與載入延遲。</div>';
+      banner.innerHTML = t.bannerHdd;
     } else if (s.data_media === "ssd") {
-      banner.innerHTML = '<div class="callout"><b>✅ 資料庫位於 SSD 磁碟區</b>，隨機讀寫延遲已最佳化。</div>';
+      banner.innerHTML = t.bannerSsd;
     } else {
-      banner.innerHTML = '<div class="callout">無法自動判斷資料庫所在磁碟類型，請自行確認 <code>ROON_DATA_PATH</code> 位於 SSD 儲存池。</div>';
+      banner.innerHTML = t.bannerUnknown;
     }
     loadPullProgress(s.state === "downloading-image" || s.state === "pull-failed");
-  }).catch(function(){
-    var el = document.getElementById("state");
-    el.className = "pill warn";
-    el.textContent = "尚無狀態（服務尚未啟動）";
-  });
   }
+
+  function load(){
+    fetch("status.json", {cache:"no-store"}).then(function(r){ return r.json(); }).then(function(s){
+      window.lastStatus = s;
+      applyStatus(s);
+    }).catch(function(){
+      window.lastStatus = null;
+      var el = document.getElementById("state");
+      el.className = "pill warn";
+      el.textContent = i18n[currentLang].bannerOffline;
+      var banner = document.getElementById("ssd-banner");
+      banner.innerHTML = i18n[currentLang].bannerOffline;
+    });
+  }
+
+  function updateUI() {
+    var t = i18n[currentLang];
+    document.documentElement.lang = currentLang === "zh" ? "zh-Hant" : "en";
+    
+    document.getElementById("btn-en").classList.toggle("active", currentLang === "en");
+    document.getElementById("btn-zh").classList.toggle("active", currentLang === "zh");
+    
+    document.getElementById("sub-title").textContent = t.subtitle;
+    document.getElementById("txt-status").textContent = t.statusTitle;
+    document.getElementById("lbl-container").textContent = t.lblContainer;
+    document.getElementById("lbl-image").textContent = t.lblImage;
+    document.getElementById("lbl-network").textContent = t.lblNetwork;
+    document.getElementById("lbl-network-val").innerHTML = t.lblNetworkVal;
+    document.getElementById("lbl-data").textContent = t.lblData;
+    document.getElementById("lbl-music").textContent = t.lblMusic;
+    document.getElementById("lbl-backup").textContent = t.lblBackup;
+    document.getElementById("lbl-tz").textContent = t.lblTz;
+    document.getElementById("lbl-updated").textContent = t.lblUpdated;
+    document.getElementById("lbl-pull-progress").textContent = t.lblPullProgress;
+    document.getElementById("lbl-status-desc").textContent = t.lblStatusDesc;
+    
+    document.getElementById("h-why-host").textContent = t.hWhyHost;
+    document.getElementById("p-why-host-desc").innerHTML = t.pWhyHostDesc;
+    
+    document.getElementById("h-ssd").textContent = t.hSsd;
+    document.getElementById("p-ssd-desc").innerHTML = t.pSsdDesc;
+    document.getElementById("callout-ssd-cfg").innerHTML = t.calloutSsdCfg;
+    document.getElementById("li-ssd-1").innerHTML = t.liSsd1;
+    document.getElementById("li-ssd-2").innerHTML = t.liSsd2;
+    document.getElementById("li-ssd-3").innerHTML = t.liSsd3;
+    document.getElementById("li-ssd-4").innerHTML = t.liSsd4;
+    
+    document.getElementById("h-folder-cfg").textContent = t.hFolderCfg;
+    document.getElementById("p-folder-cfg-desc").innerHTML = t.pFolderCfgDesc;
+    document.getElementById("lbl-in-music").innerHTML = t.lblInMusic;
+    document.getElementById("lbl-in-data").innerHTML = t.lblInData;
+    document.getElementById("lbl-in-backup").innerHTML = t.lblInBackup;
+    document.getElementById("save-btn").textContent = t.saveBtn;
+    document.getElementById("callout-roon-app").innerHTML = t.calloutRoonApp;
+    
+    document.getElementById("h-first-time").textContent = t.hFirstTime;
+    document.getElementById("li-ft-1").innerHTML = t.liFt1;
+    document.getElementById("li-ft-2").innerHTML = t.liFt2;
+    document.getElementById("li-ft-3").innerHTML = t.liFt3;
+    document.getElementById("li-ft-4").innerHTML = t.liFt4;
+    document.getElementById("p-log-paths").innerHTML = t.pLogPaths;
+    
+    document.getElementById("h-commands").textContent = t.hCommands;
+    document.getElementById("pre-commands").textContent = t.preCommands;
+    document.getElementById("p-footer").innerHTML = t.pFooter;
+    
+    if (window.lastStatus) {
+      applyStatus(window.lastStatus);
+    }
+  }
+
+  // Initial update
+  updateUI();
+  
   load();
   setInterval(load, 10000);
 })();
