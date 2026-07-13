@@ -4,7 +4,7 @@
 
 [![Build QPKG](../../actions/workflows/build.yml/badge.svg)](../../actions/workflows/build.yml)
 
-以 [qnap-dev/containerized-qpkg](https://github.com/qnap-dev/containerized-qpkg) 的架構，
+鑒於 Ronn 官方在 QNAP App Center 中的套件已經是舊版本且因為架構升級亦無更新版本的動作，於是我們以 [qnap-dev/containerized-qpkg](https://github.com/qnap-dev/containerized-qpkg) 的架構，
 把 [RoonLabs 官方 Docker 映像](https://github.com/RoonLabs/roon-docker)（`ghcr.io/roonlabs/roonserver`）
 包裝成 QNAP App Center 可安裝的 QPKG。
 
