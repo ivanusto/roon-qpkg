@@ -269,7 +269,13 @@
     }
   };
 
-  var currentLang = localStorage.getItem("roon_qpkg_lang") || "en";
+  function detectLang(){
+    // First visit: Chinese browser locales (zh-TW/zh-CN/zh-HK/...) get Chinese,
+    // every other locale gets English. Manual choice below overrides this.
+    var lang = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+    return String(lang).toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
+  }
+  var currentLang = localStorage.getItem("roon_qpkg_lang") || detectLang();
 
   window.setLang = function(lang) {
     currentLang = lang;
