@@ -1,0 +1,51 @@
+﻿name: Auto Release & Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag version (e.g. v1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine Version
+        id: get_version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG_VER="${{ github.event.inputs.version }}"
+          else
+            TAG_VER="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "TAG_VER=${TAG_VER}" >> $GITHUB_ENV
+
+      - name: Package Repository Artifact
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          ZIP_NAME="${REPO_NAME}-${TAG_VER}.zip"
+          zip -r "${ZIP_NAME}" . -x "*.git*" "*node_modules*" "*.DS_Store" "*claude-memory*" "*.claude*" "*.bak*"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+      - name: Publish Release to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_VER }}
+          name: "Release ${{ env.TAG_VER }}"
+          generate_release_notes: true
+          files: |
+            ${{ env.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
