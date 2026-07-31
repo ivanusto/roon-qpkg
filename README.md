@@ -150,4 +150,4 @@ GitHub Actions builds the qpkg artifact on every push and automatically publishe
 
 ## License & Trademark
 
-The management scripts are licensed under the MIT License. Roon and Roon Server are products of Roon Labs LLC, and their software/images are subject to Roon Labs' own terms of service. This project is not affiliated with Roon Labs or QNAP.
+The management scripts are licensed under the Apache License 2.0. Roon and Roon Server are products of Roon Labs LLC, and their software/images are subject to Roon Labs' own terms of service. This project is not affiliated with Roon Labs or QNAP.
