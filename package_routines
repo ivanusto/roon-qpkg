@@ -50,6 +50,10 @@ pkg_install(){
 }
 
 pkg_post_install(){
+    # qbuild keeps the builder's uid (1001 on GitHub runners, the
+    # developer's own on a workstation). On a NAS that uid can belong to a
+    # real user, who could then edit scripts that QTS runs as root.
+    chown -R 0:0 "${SYS_QPKG_DIR}"
     # Keep an existing configuration across re-installs/upgrades.
     if [ ! -f "${SYS_QPKG_DIR}/roon.conf" ]; then
         cp "${SYS_QPKG_DIR}/roon.conf.default" "${SYS_QPKG_DIR}/roon.conf"
